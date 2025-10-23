@@ -9,6 +9,7 @@ venv/
 .env
 *.sqlite3
 *.db
+key/
 
 # VSCode / IDE
 .vscode/
@@ -17,3 +18,4 @@ venv/
 # macOS
 .DS_Store
 
+*.pem

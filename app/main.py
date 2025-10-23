@@ -1,0 +1,45 @@
+from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import Response
+import json
+
+from .database import Base, engine
+from . import auth, models
+
+class UTF8JSONResponse(Response):
+    media_type = "application/json; charset=utf-8"
+    def render(self, content) -> bytes:
+        return json.dumps(jsonable_encoder(content), ensure_ascii=False).encode("utf-8")
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="IPCam API", default_response_class=UTF8JSONResponse)
+app.include_router(auth.router)
+
+@app.get("/")
+def ping():
+    return {"ok": True}
+
+from fastapi.openapi.models import APIKey, APIKeyIn, SecuritySchemeType
+from fastapi.openapi.utils import get_openapi
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+    openapi_schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi

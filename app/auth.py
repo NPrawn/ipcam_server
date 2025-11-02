@@ -81,9 +81,9 @@ def build_auth_url(state_mode: str) -> str:
 def naver_login():
     return {"auth_url": build_auth_url("login")}
 
-@router.get("/naver/signup")
-def naver_signup():
-    return {"auth_url": build_auth_url("signup")}
+# @router.get("/naver/signup")
+# def naver_signup():
+#     return {"auth_url": build_auth_url("signup")}
 
 # ───────────────────────────────────────────────
 # CALLBACK: 네이버 code 처리, 사용자 검증, state 저장
@@ -125,27 +125,33 @@ def naver_callback(code: str, state: str):
     )
     email = profile.get("email")
 
-    # 3) DB 사용자 조회 또는 생성
+    # 3) DB 사용자 조회 또는 '자동 생성'
     db: Session = SessionLocal()
     user = db.query(User).filter(User.social_id == social_id).first()
 
-    if mode == "login":
-        if not user:
-            raise HTTPException(403, "user_not_registered")
-    elif mode == "signup":
-        if user:
-            raise HTTPException(409, "already_registered")
-        user = User(provider="naver", social_id=social_id, name=name, email=email)
+    if not user:
+        # ✅ 통합 정책: 없으면 자동 회원가입
+        user = User(
+            provider="naver",
+            social_id=social_id,
+            name=name,
+            email=email,
+            created_at=datetime.utcnow(),
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
     else:
-        raise HTTPException(400, "invalid_state")
-
-    # 4) state 기반 임시 세션 저장
-    temp = TempLoginSession(state=state, user_id=user.id)
-    db.add(temp)
-    db.commit()
+        # 선택: 이름/이메일 최신화 (원하지 않으면 주석 처리)
+        updated = False
+        if name and user.name != name:
+            user.name = name
+            updated = True
+        if email and user.email != email:
+            user.email = email
+            updated = True
+        if updated:
+            db.commit()
 
     return {
         "message": "login_ready",

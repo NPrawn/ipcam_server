@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from app.routers.registration import router as reg_router
+from app.routers.devices import router as devices_router
 import json
 
 from .database import Base, engine
@@ -27,6 +28,7 @@ def dbg(request: __import__("fastapi").Request):
     }
 app.include_router(auth.router)
 app.include_router(reg_router)
+app.include_router(devices_router)
 
 
 @app.get("/")

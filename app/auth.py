@@ -153,6 +153,11 @@ def naver_callback(code: str, state: str):
         if updated:
             db.commit()
 
+    # 4) state 기반 임시 세션 저장
+    temp = TempLoginSession(state=state, user_id=user.id)
+    db.add(temp)
+    db.commit()
+    
     return {
         "message": "login_ready",
         "state": state,

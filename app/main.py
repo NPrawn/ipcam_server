@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
-from app.routers.registration import router as reg_router
 from app.routers.devices import router as devices_router
 import json
 
@@ -16,18 +15,8 @@ class UTF8JSONResponse(Response):
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="IPCam API", default_response_class=UTF8JSONResponse)
-# mTLS 헤더 디버그용
-@app.get("/_debug/mtls")
-def dbg(request: __import__("fastapi").Request):
-    h = request.headers
-    return {
-        "verify": h.get("x-ssl-client-verify"),
-        "serial": h.get("x-ssl-client-serial"),
-        "subject": h.get("x-ssl-client-s-dn"),
-        "issuer": h.get("x-ssl-client-i-dn"),
-    }
+
 app.include_router(auth.router)
-app.include_router(reg_router)
 app.include_router(devices_router)
 
 

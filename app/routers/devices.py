@@ -44,30 +44,30 @@ def issue_registration_token(
     db.commit()
     return RegistrationTokenOut(token=token, expires_in_seconds=REG_TOKEN_TTL_MIN * 60)
 
-# ─────────────────────────────────────────────────────────────
-# 2) 등록용 QR PNG (토큰 즉석 발급 + {token, api} → PNG)
-# ─────────────────────────────────────────────────────────────
-@router.get("/registration-qr.png")
-def get_registration_qr_png(
-    db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
-    api_base: str = Query(..., description="기기가 호출할 API 베이스 URL (예: https://<IP or Domain>)"),
-):
-    token = secrets.token_urlsafe(24)
-    expires_at = datetime.utcnow() + timedelta(minutes=REG_TOKEN_TTL_MIN)
-    db.add(RegistrationToken(token=token, user_id=user_id, expires_at=expires_at))
-    db.commit()
+# # ─────────────────────────────────────────────────────────────
+# # 2) 등록용 QR PNG (토큰 즉석 발급 + {token, api} → PNG)
+# # ─────────────────────────────────────────────────────────────
+# @router.get("/registration-qr.png")
+# def get_registration_qr_png(
+#     db: Session = Depends(get_db),
+#     user_id: int = Depends(get_current_user_id),
+#     api_base: str = Query(..., description="기기가 호출할 API 베이스 URL (예: https://<IP or Domain>)"),
+# ):
+#     token = secrets.token_urlsafe(24)
+#     expires_at = datetime.utcnow() + timedelta(minutes=REG_TOKEN_TTL_MIN)
+#     db.add(RegistrationToken(token=token, user_id=user_id, expires_at=expires_at))
+#     db.commit()
 
-    payload = {"token": token, "api": api_base}
-    data = json.dumps(payload, ensure_ascii=False)
+#     payload = {"token": token, "api": api_base}
+#     data = json.dumps(payload, ensure_ascii=False)
 
-    img = qrcode.make(data)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
+#     img = qrcode.make(data)
+#     buf = io.BytesIO()
+#     img.save(buf, format="PNG")
+#     buf.seek(0)
 
-    headers = {"X-Registration-Token": token}
-    return StreamingResponse(buf, media_type="image/png", headers=headers)
+#     headers = {"X-Registration-Token": token}
+#     return StreamingResponse(buf, media_type="image/png", headers=headers)
 
 # ─────────────────────────────────────────────────────────────
 # 3) 기기 등록 (IPcam → 서버)  ※ 스트리밍 서버 연동 제거
@@ -84,9 +84,9 @@ def register_device(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    # mTLS 확인
-    if request.headers.get("x-ssl-client-verify") != "SUCCESS":
-        raise HTTPException(403, "mTLS required")
+    # # mTLS 확인
+    # if request.headers.get("x-ssl-client-verify") != "SUCCESS":
+    #     raise HTTPException(403, "mTLS required")
 
     # 1) 등록 토큰 조회 + 락
     reg = (

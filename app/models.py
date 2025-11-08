@@ -82,10 +82,6 @@ class Device(Base):
     model       = Column(String(255), nullable=True)
     serial_no   = Column(String(255), nullable=True)
 
-    # ↓ 설계에 없지만 기존 코드 사용 중이면 유지(나중에 제거 가능)
-    mac_addr        = Column(String(64),  nullable=True)
-    vpn_tunnel_id   = Column(String(255), nullable=True)
-
     # 상태: 기본값 waiting → 등록 완료 시 registered 로 갱신
     status      = Column(String(32), nullable=False, default="waiting")
 

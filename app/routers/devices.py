@@ -1,4 +1,5 @@
 # app/routers/devices.py
+import base64
 import io
 import json
 import qrcode
@@ -6,7 +7,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,10 @@ from app.database import SessionLocal
 from app.models import RegistrationToken, Device
 from app.security import get_current_user_id
 from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut
+
+# Ed25519 서명 검즈
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
 
@@ -43,6 +48,24 @@ def issue_registration_token(
     db.add(RegistrationToken(token=token, user_id=user_id, expires_at=expires_at))
     db.commit()
     return RegistrationTokenOut(token=token, expires_in_seconds=REG_TOKEN_TTL_MIN * 60)
+
+# ─────────────────────────────────────────────
+# Ed25519 검증 유틸
+#   - dev.pub_key 가 PEM이면 PEM 로드
+#   - 아니면 base64 raw 32바이트로 간주
+# ─────────────────────────────────────────────
+def verify_ed25519_signature(pub_key_text: str, message: bytes, sig_b64: str) -> bool:
+    try:
+        sig = base64.b64decode(sig_b64)
+        data = pub_key_text.encode() if isinstance(pub_key_text, str) else pub_key_text
+        if data.startswith(b"-----BEGIN"):
+            pub = load_pem_public_key(data)
+        else:
+            pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(pub_key_text))
+        pub.verify(sig, message)
+        return True
+    except Exception:
+        return False
 
 # # ─────────────────────────────────────────────────────────────
 # # 2) 등록용 QR PNG (토큰 즉석 발급 + {token, api} → PNG)
@@ -80,9 +103,9 @@ def issue_registration_token(
 # ─────────────────────────────────────────────────────────────
 @router.post("/register", response_model=DeviceOut)
 def register_device(
-    payload: DeviceRegisterIn,
-    request: Request,
+    body: DeviceRegisterIn,
     db: Session = Depends(get_db),
+    reg_token: str = Header(..., alias="X-Registration-Token")
 ):
     # # mTLS 확인
     # if request.headers.get("x-ssl-client-verify") != "SUCCESS":
@@ -91,7 +114,7 @@ def register_device(
     # 1) 등록 토큰 조회 + 락
     reg = (
         db.query(RegistrationToken)
-        .filter(RegistrationToken.token == payload.token)
+        .filter(RegistrationToken.token == reg_token)
         .with_for_update(nowait=False)
         .first()
     )
@@ -103,34 +126,36 @@ def register_device(
         raise HTTPException(400, "token_expired")
 
     # 2) 디바이스 조회 + 락
+    # 2) 사전등록 기기 조회(시리얼)
     dev = (
         db.query(Device)
-        .filter(Device.device_id == payload.device_id)
+        .filter(Device.serial_no == body.serial_no)
         .with_for_update(nowait=False)
         .first()
     )
 
-    # 기존 소유자 보호(이미 다른 사용자 소유면 충돌)
-    if dev and dev.owner_user_id and dev.owner_user_id != reg.user_id:
+    if not dev:
+        raise HTTPException(404, "device_not_found")
+    if dev.owner_user_id and dev.owner_user_id != reg.user_id:
         raise HTTPException(409, "already_owned_by_other_user")
 
-    if dev:
-        dev.owner_user_id = reg.user_id
-        if payload.pub_key:
-            dev.pub_key = payload.pub_key
-        dev.model = payload.model or dev.model
-        dev.serial_no = payload.serial_no or dev.serial_no
-        dev.status = "registered"
-    else:
-        dev = Device(
-            device_id=payload.device_id,
-            owner_user_id=reg.user_id,
-            pub_key=payload.pub_key,
-            model=payload.model,
-            serial_no=payload.serial_no,
-            status="registered",
-        )
-        db.add(dev)
+    # 3) 서명 검증: 기기 공개키로 "토큰 문자열" 검증
+    if not dev.pub_key:
+        raise HTTPException(400, "device_pubkey_missing")
+    if not verify_ed25519_signature(dev.pub_key, reg_token.encode(), body.signature_b64):
+        raise HTTPException(401, "invalid_signature")
+
+    # 4) 연결/업데이트
+    dev.owner_user_id = reg.user_id
+    if body.model:
+        dev.model = body.model
+    dev.status = "registered"
+
+    # 5) 토큰 1회성 소모
+    reg.used = True
+    db.commit()
+    db.refresh(dev)
+    return DeviceOut.from_orm(dev)
 
     # 4) 토큰 1회성 소모(원자적)
     reg.used = True
@@ -177,4 +202,9 @@ def delete_device(
     if not dev:
         raise HTTPException(404, "not_found")
     if dev.owner_user_id != user_id:
-        raise
+        raise HTTPException(403, "forbidden")
+    
+    dev.owne_user_id = None
+    dev.status = "inactive"
+    db.commit()
+    return Response(status_code=204)

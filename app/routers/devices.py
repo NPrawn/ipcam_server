@@ -114,24 +114,20 @@ def register_device(
     if dev and dev.owner_user_id and dev.owner_user_id != reg.user_id:
         raise HTTPException(409, "already_owned_by_other_user")
 
-    # 3) 디바이스 upsert (스트리밍 연동 삭제: vpn_tunnel_id는 더미/기본)
-    vpn_tunnel_id: Optional[str] = None
     if dev:
         dev.owner_user_id = reg.user_id
+        if payload.pub_key:
+            dev.pub_key = payload.pub_key
         dev.model = payload.model or dev.model
-        dev.mac_addr = payload.mac_addr or dev.mac_addr
         dev.serial_no = payload.serial_no or dev.serial_no
-        if vpn_tunnel_id:
-            dev.vpn_tunnel_id = vpn_tunnel_id
         dev.status = "registered"
     else:
         dev = Device(
             device_id=payload.device_id,
             owner_user_id=reg.user_id,
+            pub_key=payload.pub_key,
             model=payload.model,
-            mac_addr=payload.mac_addr,
             serial_no=payload.serial_no,
-            vpn_tunnel_id=vpn_tunnel_id or f"vpn-{payload.device_id}",  # 임시/더미
             status="registered",
         )
         db.add(dev)

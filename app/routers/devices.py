@@ -10,17 +10,26 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.database import SessionLocal
 from app.models import RegistrationToken, Device
 from app.security import get_current_user_id
 from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut
+from app.crypto.keyring import load_keys_from_env
+from app.crypto.box import encrypt_for_server, decrypt_on_server
 
 # Ed25519 서명 검즈
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
+
+PUB_KEY, PRIV_KEY = load_keys_from_env()
+
+class RegisterReq(BaseModel):
+    device_id: str
+    token_plain: str            # 기기에서 보내는 평문 토큰(HTTPS 전제) 혹은 이미 암호문을 보낼 수도 있음
 
 # 등록 토큰 TTL(분)
 REG_TOKEN_TTL_MIN = 5
@@ -105,12 +114,26 @@ def verify_ed25519_signature(pub_key_text: str, message: bytes, sig_b64: str) ->
 def register_device(
     body: DeviceRegisterIn,
     db: Session = Depends(get_db),
-    reg_token: str = Header(..., alias="X-Registration-Token")
+    reg_token_enc: Optional[str] = Header(None, alias="X-Registration-Token-Enc"),
+    reg_token_plain: Optional[str] = Header(None, alias="X-Registration-Token"),
+
 ):
     # # mTLS 확인
     # if request.headers.get("x-ssl-client-verify") != "SUCCESS":
     #     raise HTTPException(403, "mTLS required")
 
+    # 0) 암호문 우선 복호화 -> 평문 토큰 획득
+    if reg_token_enc:
+        try:
+            reg_token = decrypt_on_server(PRIV_KEY, reg_token_enc).decode()
+        except Exception:
+            raise HTTPException(400, "invalid_encrypted_token")
+    elif reg_token_plain:
+        # 구규격 폴백(가능하면 제거 권장)
+        reg_token = reg_token_plain
+    else:
+        raise HTTPException(400, "missing_registration_token")
+    
     # 1) 등록 토큰 조회 + 락
     reg = (
         db.query(RegistrationToken)
@@ -204,7 +227,7 @@ def delete_device(
     if dev.owner_user_id != user_id:
         raise HTTPException(403, "forbidden")
     
-    dev.owne_user_id = None
+    dev.owner_user_id = None
     dev.status = "inactive"
     db.commit()
     return Response(status_code=204)

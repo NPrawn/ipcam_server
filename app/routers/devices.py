@@ -109,7 +109,7 @@ def verify_ed25519_signature(pub_key_text: str, message: bytes, sig_b64: str) ->
 def register_device(
     body: DeviceRegisterIn,
     db: Session = Depends(get_db),
-    reg_jwt: str = Header(..., alias="X-Registartion-Token")
+    reg_jwt: str = Header(..., alias="X-Registration-Token")
 ):
     # # mTLS 확인
     # if request.headers.get("x-ssl-client-verify") != "SUCCESS":

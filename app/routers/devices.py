@@ -1,14 +1,9 @@
 # app/routers/devices.py
 import base64
-import io
-import json
-import qrcode
-import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, Header
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -16,8 +11,7 @@ from app.database import SessionLocal
 from app.models import RegistrationToken, Device
 from app.security import get_current_user_id
 from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut
-from app.crypto.keyring import load_keys_from_env
-from app.crypto.box import encrypt_for_server, decrypt_on_server
+from app.crypto.jwt_utils import issue_reg_jwt, verify_reg_jwt
 
 # Ed25519 서명 검즈
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -25,11 +19,10 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 router = APIRouter(prefix="/devices", tags=["Devices"])
 
-PUB_KEY, PRIV_KEY = load_keys_from_env()
-
 class RegisterReq(BaseModel):
-    device_id: str
-    token_plain: str            # 기기에서 보내는 평문 토큰(HTTPS 전제) 혹은 이미 암호문을 보낼 수도 있음
+    model: Optional[str] = None
+    serial_no: str
+    signature_b64: str     # 기기가 'JWT 문자열'에 대해 Ed25519로 서명한 값(Base64)
 
 # 등록 토큰 TTL(분)
 REG_TOKEN_TTL_MIN = 5
@@ -52,11 +45,13 @@ def issue_registration_token(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
-    token = secrets.token_urlsafe(24)
-    expires_at = datetime.utcnow() + timedelta(minutes=REG_TOKEN_TTL_MIN)
-    db.add(RegistrationToken(token=token, user_id=user_id, expires_at=expires_at))
+    jwt_token, jti, exp = issue_reg_jwt(user_id, ttl_minutes=REG_TOKEN_TTL_MIN)
+    # DB에는 jti만 저장(1회성 체크용)
+    db.add(RegistrationToken(token=jti, user_id=user_id, expires_at=exp))
     db.commit()
-    return RegistrationTokenOut(token=token, expires_in_seconds=REG_TOKEN_TTL_MIN * 60)
+    # 응답은 JWT
+    return RegistrationTokenOut(token=jwt_token, expires_in_seconds=REG_TOKEN_TTL_MIN * 60)
+
 
 # ─────────────────────────────────────────────
 # Ed25519 검증 유틸
@@ -114,30 +109,25 @@ def verify_ed25519_signature(pub_key_text: str, message: bytes, sig_b64: str) ->
 def register_device(
     body: DeviceRegisterIn,
     db: Session = Depends(get_db),
-    reg_token_enc: Optional[str] = Header(None, alias="X-Registration-Token-Enc"),
-    reg_token_plain: Optional[str] = Header(None, alias="X-Registration-Token"),
-
+    reg_jwt: str = Header(..., alias="X-Registartion-Token")
 ):
     # # mTLS 확인
     # if request.headers.get("x-ssl-client-verify") != "SUCCESS":
     #     raise HTTPException(403, "mTLS required")
 
-    # 0) 암호문 우선 복호화 -> 평문 토큰 획득
-    if reg_token_enc:
-        try:
-            reg_token = decrypt_on_server(PRIV_KEY, reg_token_enc).decode()
-        except Exception:
-            raise HTTPException(400, "invalid_encrypted_token")
-    elif reg_token_plain:
-        # 구규격 폴백(가능하면 제거 권장)
-        reg_token = reg_token_plain
-    else:
-        raise HTTPException(400, "missing_registration_token")
+    # 0) JWT 검증
+    try:
+        claims = verify_reg_jwt(reg_jwt)
+    except:
+        raise HTTPException(400, "invalid_token")
+    
+    jti = claims.get("jti")
+    user_id = int(claims.get("sub"))
     
     # 1) 등록 토큰 조회 + 락
     reg = (
         db.query(RegistrationToken)
-        .filter(RegistrationToken.token == reg_token)
+        .filter(RegistrationToken.token == jti)
         .with_for_update(nowait=False)
         .first()
     )
@@ -162,10 +152,10 @@ def register_device(
     if dev.owner_user_id and dev.owner_user_id != reg.user_id:
         raise HTTPException(409, "already_owned_by_other_user")
 
-    # 3) 서명 검증: 기기 공개키로 "토큰 문자열" 검증
+    # 3) 서명 검증: 기기 공개키로 JWT 문자열에 대한 검증
     if not dev.pub_key:
         raise HTTPException(400, "device_pubkey_missing")
-    if not verify_ed25519_signature(dev.pub_key, reg_token.encode(), body.signature_b64):
+    if not verify_ed25519_signature(dev.pub_key, reg_jwt.encode(), body.signature_b64):
         raise HTTPException(401, "invalid_signature")
 
     # 4) 연결/업데이트
@@ -176,13 +166,6 @@ def register_device(
 
     # 5) 토큰 1회성 소모
     reg.used = True
-    db.commit()
-    db.refresh(dev)
-    return DeviceOut.from_orm(dev)
-
-    # 4) 토큰 1회성 소모(원자적)
-    reg.used = True
-
     db.commit()
     db.refresh(dev)
     return DeviceOut.from_orm(dev)

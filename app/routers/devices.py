@@ -9,9 +9,10 @@ from pydantic import BaseModel
 
 from app.database import SessionLocal
 from app.models import RegistrationToken, Device
-from app.security import get_current_user_id
-from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut
-from app.crypto.jwt_utils import issue_reg_jwt, verify_reg_jwt
+from app.security.security import get_current_user_id
+from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut, DeviceRegisterOut
+from app.crypto.jwt_utils import issue_reg_jwt, verify_reg_jwt, issue_vpn_jwt, verify_vpn_jwt, VpnJwtError
+from app.security.mtls import require_mtls_client
 
 # Ed25519 서명 검즈
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -158,17 +159,30 @@ def register_device(
     if not verify_ed25519_signature(dev.pub_key, reg_jwt.encode(), body.signature_b64):
         raise HTTPException(401, "invalid_signature")
 
-    # 4) 연결/업데이트
-    dev.owner_user_id = reg.user_id
+    # 4) 상태 전이 + VPN 토큰 발급
     if body.model:
         dev.model = body.model
-    dev.status = "registered"
+    dev.owner_user_id = reg.user_id
+    dev.status = "auth_pending"
+    dev.auth_state = "auth_pending"
+
+    vpn_jwt, vpn_jti, vpn_exp = issue_vpn_jwt(dev.device_id, reg.user_id)
+    dev.vpn_auth_token = vpn_jwt
+    dev.auth_expires_at = vpn_exp
+    dev.last_reg_jti = jti
 
     # 5) 토큰 1회성 소모
     reg.used = True
     db.commit()
     db.refresh(dev)
-    return DeviceOut.from_orm(dev)
+
+
+    return DeviceRegisterOut(
+        **DeviceOut.from_orm(dev).dict(),
+        auth_state=dev.auth_state,
+        vpn_auth_token=dev.vpn_auth_token,
+        auth_expires_at=dev.auth_expires_at
+    )
 
 # ─────────────────────────────────────────────────────────────
 # 4) 단일 기기 상태 조회 (로그인 사용자 본인 소유만)
@@ -214,3 +228,148 @@ def delete_device(
     dev.status = "inactive"
     db.commit()
     return Response(status_code=204)
+
+@router.get("/{device_id}/streaming-credentials")
+def get_streaming_credentials_mtls(
+    device_id: str,
+    db: Session = Depends(get_db),
+    mtls_ctx: dict = Depends(require_mtls_client),
+):
+    dev = db.query(Device).filter(Device.device_id == device_id).first()
+    if not dev or not dev.vpn_auth_token:
+        raise HTTPException(404, "not_ready")
+    if dev.auth_expires_at and dev.auth_expires_at < datetime.utcnow():
+        raise HTTPException(400, "vpn_token_expired")
+    if dev.auth_state not in ("auth_pending", "vpn_ready", "stream_ready"):
+        raise HTTPException(400, "invalid_state")
+    
+    return {
+        "device_id": dev.device_id,
+        "device_pub_key": dev.pub_key,
+        "vpn_auth_token": dev.vpn_auth_token,
+        "auth_expires_at": dev.auth_expires_at,
+        "owner_user_id": dev.owner_user_id,
+        "issued_to": mtls_ctx["client_cn"],     # 누가 가져갔는지 감사용
+    }
+
+def _cleanup_previous_links(db: Session, dev: Device):
+    """
+    기존 저장 상태 있으면 삭제
+    추후 구현
+    """
+    return
+
+def _finalize_registration(db: Session, dev: Device):
+    """
+    두 콜백(vpn_confirm & stream_donfirm)이 모두 완료되면
+    하나의 트랜잭션 안에서 registered로 전이
+    """
+
+    if dev.auth_state == "registered" and dev.status == "registered":
+        return
+    
+    if not (dev.vpn_confirmed_at and dev.stream_confirmed_at):
+        return
+    
+    _cleanup_previous_links(db, dev)
+
+    dev.status = "registered"
+    dev.auth_state = "registered"
+    dev.vpn_auth_token = None
+    dev.auth_expires_at = None
+    db.commit()
+    db.refresh(dev)
+
+@router.post("/{device_id}/vpn-confirm")
+def vpn_confirm(
+    device_id: str,
+    db: Session = Depends(get_db),
+    vpn_token: str | None = Header(None, alias="X-VPN-Token"),
+):
+    # 1) 토큰 존재/검증
+    if not vpn_token:
+        raise HTTPException(401, "missing_vpn_token")
+    try:
+        payload = verify_vpn_jwt(vpn_token)
+    except VpnJwtError as e:
+        raise HTTPException(401, f"invalid_vpn_token: {e}")
+    
+    # 2) 토큰 대상 기기 일치 확인
+    sub = payload.get("sub", "")
+    if sub != f"device:{device_id}":
+        raise HTTPException(401, "vpn_token_device_mismatch")
+    
+    # 3) 디바이스 락 + 상태 검증
+    dev = (
+        db.query(Device)
+            .filter(Device.device_id == device_id)
+            .with_for_update(nowait=False)
+            .first()
+    )
+    if not dev:
+        raise HTTPException(404, "not_found")
+    
+    if dev.auth_state not in ("auth_pending", "stream_ready", "vpn_ready"):
+        if dev.auth_state == "registered":
+            return {"ok": True, "state": dev.auth_state}
+        raise HTTPException(400, "invalid_state")
+    
+    # 4) 저장된 VPN 토큰과도 매칭
+    if dev.vpn_auth_token is None:
+        raise HTTPException(400, "no_vpn_token_issued")
+    if dev.vpn_auth_token != vpn_token:
+        raise HTTPException(401, "vpn_token_mismatch")
+    
+    # 5) 만료 확인
+    if dev.auth_expires_at and dev.auth_expires_at < datetime.utcnow():
+        raise HTTPException(400, "vpn_token_expired")
+
+    # 6) 확인 기록 + 상태 전이
+    if not dev.vpn_confirmed_at:
+        dev.vpn_confirmed_at = datetime.utcnow()
+    dev.status = "vpn_ready"
+
+    if not dev.stream_confirmed_at:
+        dev.auth_state = "vpn_ready"
+    
+
+    db.commit()
+    db.refresh(dev)
+
+    _finalize_registration(db, dev)
+    return {"ok": True, "state": dev.auth_state}
+
+@router.post("/{device_id}/stream-confirm")
+def stream_confirm(
+    device_id: str,
+    db: Session = Depends(get_db),
+    mtls_ctx: dict = Depends(require_mtls_client),
+):
+    # 1) 디바이스 락 + 상태 검증
+    dev = (
+        db.query(Device)
+            .filter(Device.device_id == device_id)
+            .with_for_update(nowait=False)
+            .first()
+    )
+    if not dev:
+        raise HTTPException(404, "not_found")
+    
+    if dev.auth_state not in ("auth_pending", "vpn_ready", "stream_ready"):
+        if dev.auth_state == "registered":
+            return {"ok": True, "state": dev.auth_state}
+        raise HTTPException(400, "invalid_state")
+    
+    # 2) 확인 기록 + 상태 전이
+    if not dev.stream_confirmed_at:
+        dev.stream_confirmed_at = datetime.utcnow()
+    dev.status = "stream_ready"
+    if not dev.vpn_confirmed_at:
+        dev.auth_state = "stream_ready"
+    
+    db.commint()
+    db.refresh(dev)
+
+    # 3) 최종화 시도
+    _finalize_registration(db, dev)
+    return {"ok": True, "state": dev.auth_state}

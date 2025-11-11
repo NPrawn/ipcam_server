@@ -27,3 +27,7 @@ class DeviceOut(BaseModel):
     class Config:
         from_attributes = True
 
+class DeviceRegisterOut(DeviceOut):
+    auth_state: str
+    vpn_auth_token: Optional[str] = None
+    auth_expires_at: Optional[datetime] = None

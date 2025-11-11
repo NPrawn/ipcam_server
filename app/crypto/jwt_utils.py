@@ -1,9 +1,10 @@
-import os, secrets
+import os, secrets, uuid
 from datetime import datetime, timedelta, timezone
 import jwt
 
 JWT_SECRET = os.getenv("REG_JWT_SECRET")
 JWT_ISSUER = os.getenv("REG_JWT_ISSUER", "ipcam")
+JWT_ALG = os.getenv("JWT_ALGORITHM")
 
 def issue_reg_jwt(user_id: int, ttl_minutes: int = 5) -> tuple[str, str, datetime]:
     """
@@ -40,3 +41,40 @@ def verify_reg_jwt(jwt_token: str) -> dict:
     if claims.get("typ") != "registration":
         raise jwt.InvalidTokenError("invalid typ")
     return claims
+
+VPN_TOKEN_TTL_MIN = int(os.getenv("VPN_TOKEN_TTL_MIN", "5"))
+
+
+def issue_vpn_jwt(device_id: str, user_id: int, ttl_minutes: int = VPN_TOKEN_TTL_MIN):
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=ttl_minutes)
+    jti = str(uuid.uuid4())
+    payload = {
+        "iss": "ipcam-server",
+        "sub": f"device:{device_id}",
+        "aud": "vpn-gateway",
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "jti": jti,
+        "uid": user_id,
+        "scope": ["vpn:tunnel"],
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+    return token, jti, exp
+
+def VpnJwtError(Exception):
+    pass
+
+def verify_vpn_jwt(token: str):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG], audience="vpn-gateway")
+    except Exception as e:
+        raise VpnJwtError("bad_iss")
+    
+    if payload.get("iss") != "ipcam-server":
+        raise VpnJwtError(str(e))
+    sub = payload.get("sub") or ""
+    if not sub.startswith("device:"):
+        raise VpnJwtError("bad_sub")
+    
+    return payload

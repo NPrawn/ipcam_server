@@ -88,4 +88,12 @@ class Device(Base):
     created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # 상태머신/인증 흐름용
+    auth_state = Column(String(32), nullable=False, default="requested")  # requested/auth_pending/vpn_ready/stream_ready/registered
+    vpn_auth_token = Column(Text, nullable=True)                          # VPN용 JWT(임시)
+    auth_expires_at = Column(DateTime, nullable=True)                     # VPN 토큰 만료시각
+    vpn_confirmed_at = Column(DateTime, nullable=True)                    # IPCam 확인 시간
+    stream_confirmed_at = Column(DateTime, nullable=True)                 # 스트리밍서버 확인 시간
+    last_reg_jti = Column(String(64), nullable=True)    
+
     owner = relationship("User", backref="devices")

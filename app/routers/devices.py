@@ -13,6 +13,8 @@ from app.security.security import get_current_user_id
 from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut, DeviceRegisterOut
 from app.crypto.jwt_utils import issue_reg_jwt, verify_reg_jwt, issue_vpn_jwt, verify_vpn_jwt, VpnJwtError
 from app.security.mtls import require_mtls_client
+from app.utils.ed25519_keyfmt import pubkey_to_raw32_b64url
+from app.utils.streaming_be_create import call_be_create_info
 
 # Ed25519 서명 검즈
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -123,7 +125,7 @@ def register_device(
         raise HTTPException(400, "invalid_token")
     
     jti = claims.get("jti")
-    user_id = int(claims.get("sub"))
+    user_id_from_claims = int(claims.get("sub"))
     
     # 1) 등록 토큰 조회 + 락
     reg = (
@@ -175,6 +177,30 @@ def register_device(
     reg.used = True
     db.commit()
     db.refresh(dev)
+
+    try:
+        pub_b64u = pubkey_to_raw32_b64url(dev.pub_key)
+    except Exception:
+        raise HTTPException(500, "device_pubkey_format_invalid")
+    
+    ok, detail = call_be_create_info(
+        device_id=dev.device_id,
+        device_pubkey_b64u=pub_b64u,
+        reg_jwt=reg_jwt,
+        owner_user_id=reg.user_id,
+    )
+
+    if not ok:
+        # 스트리밍 서버 반영 실패 → 운영 재시도 가능 상태로 표시
+        dev.auth_state = "stream_pending"
+        dev.status = "vpn_ready"   # VPN 토큰 발급은 끝남
+        db.commit()
+        db.refresh(dev)
+    else:
+        dev.auth_state = "vpn_ready"
+        dev.status = "vpn_ready"
+        db.commit()
+        db.refresh(dev)
 
 
     return DeviceRegisterOut(

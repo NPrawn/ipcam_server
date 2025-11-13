@@ -62,7 +62,7 @@ class Device(Base):
         UniqueConstraint("device_id", name="uq_devices_device_id"),
         UniqueConstraint("pub_key",  name="uq_devices_pub_key"),  # NULL 은 중복 허용(DB별), 값이 있으면 고유
         CheckConstraint(
-            "status IN ('waiting','registered','inactive','revoked')",
+            "status IN ('inactive','auth_pending','vpn_ready','stream_ready','registered)",
             name="ck_devices_status"
         ),
     )

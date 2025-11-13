@@ -22,7 +22,7 @@ class DeviceOut(BaseModel):
     owner_user_id: Optional[int] = None
     model: Optional[str] = None
     serial_no: Optional[str] = None
-    status: Literal["waiting","registered","inactive","revoked"]
+    status: Literal["waiting","registered","inactive","revoked","auth_pending","vpn_ready","stream_ready"]
     created_at: datetime
     class Config:
         from_attributes = True

@@ -1,7 +1,7 @@
 # app/utils/streaming_be_create.py
 import os, time, requests
 
-STREAMING_BASE = os.getenv("STREAMING_BASE", "https://stream.example.com")
+STREAMING_BASE = os.getenv("STREAMING_BASE", "https://cowboyhomecam.duckdns.org")
 STREAMING_BE_CREATE_PATH = "/tunnels/be_create_info"
 
 # mTLS 쓰려면 이 3개 설정(없으면 일반 TLS)

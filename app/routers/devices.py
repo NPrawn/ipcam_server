@@ -165,7 +165,6 @@ def register_device(
     if body.model:
         dev.model = body.model
     dev.owner_user_id = reg.user_id
-    dev.status = "auth_pending"
     dev.auth_state = "auth_pending"
 
     vpn_jwt, vpn_jti, vpn_exp = issue_vpn_jwt(dev.device_id, reg.user_id)

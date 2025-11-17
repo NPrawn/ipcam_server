@@ -31,3 +31,23 @@ class DeviceRegisterOut(DeviceOut):
     auth_state: str
     vpn_auth_token: Optional[str] = None
     auth_expires_at: Optional[datetime] = None
+
+# 스트리밍 시작 요청
+class StreamingStartIn(BaseModel):
+    device_id: str
+    sdp_offer: str
+
+# 스트리밍 시작 응답
+class StreamingStartOut(BaseModel):
+    device_id: str
+    sdp_answer: str
+
+# 스트리밍 종료 요청
+class StreamingEndIn(BaseModel):
+    device_id: str
+    session_name: str
+
+# 스트리밍 종료 응답
+class StreamingEndOut(BaseModel):
+    device_id: str
+    success: bool

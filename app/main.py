@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from app.routers.devices import router as devices_router
+from app.routers.streaming import router as streaming_router
 import json
 
 from .database import Base, engine
@@ -21,6 +22,7 @@ app = FastAPI(title="IPCam API", default_response_class=UTF8JSONResponse)
 
 app.include_router(auth.router)
 app.include_router(devices_router)
+app.include_router(streaming_router)
 
 
 @app.get("/")

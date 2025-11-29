@@ -23,7 +23,7 @@ def call_be_create_info(*, device_id: str, device_pubkey_b64u: str, reg_jwt: str
     }
     body = {
         "device_id": device_id,
-        "device_pubkey_b64": device_pubkey_b64u,
+        "device_pubkey": device_pubkey_b64u,
         # body.registration_token 없이도 동작(Authorization 우선)하지만,
         # 이 라인을 남겨두면 폴백 경로도 커버됨.
         "registration_token": reg_jwt,

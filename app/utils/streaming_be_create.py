@@ -2,7 +2,8 @@
 import os, time, requests
 
 STREAMING_BASE = os.getenv("STREAMING_BASE", "https://cowboyhomecam.duckdns.org")
-STREAMING_BE_CREATE_PATH = "/tunnels/be_create_info"
+STREAMING_BE_CREATE_PATH = "/api/vpn/tunnels/be_create_info"
+# STREAMING_BE_CREATE_PATH = "/tunnels/be_create_info"
 
 # mTLS 쓰려면 이 3개 설정(없으면 일반 TLS)
 STREAMING_CLIENT_CERT = os.getenv("STREAMING_CLIENT_CERT")  # "/etc/mtls/apiserver.crt"

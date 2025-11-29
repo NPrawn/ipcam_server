@@ -159,6 +159,7 @@ def register_device(
     if not dev.pub_key:
         raise HTTPException(400, "device_pubkey_missing")
     if not verify_ed25519_signature(dev.pub_key, reg_jwt.encode(), body.signature_b64):
+        print("SERVER RECEIVED JWT HEX:", reg_jwt.encode().hex())
         raise HTTPException(401, "invalid_signature")
 
     # 4) 상태 전이 + VPN 토큰 발급

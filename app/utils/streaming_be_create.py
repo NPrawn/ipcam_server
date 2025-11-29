@@ -9,6 +9,10 @@ STREAMING_CLIENT_CERT = os.getenv("STREAMING_CLIENT_CERT")  # "/etc/mtls/apiserv
 STREAMING_CLIENT_KEY  = os.getenv("STREAMING_CLIENT_KEY")   # "/etc/mtls/apiserver.key"
 STREAMING_CA          = os.getenv("STREAMING_CA")           # "/etc/mtls/ca.crt"
 
+print("DEBUG STREAMING_CA =", STREAMING_CA)
+print("DEBUG CLIENT_CERT  =", STREAMING_CLIENT_CERT)
+print("DEBUG CLIENT_KEY   =", STREAMING_CLIENT_KEY)
+
 def call_be_create_info(*, device_id: str, device_pubkey_b64u: str, reg_jwt: str, owner_user_id: int, timeout=5):
     url = STREAMING_BASE.rstrip("/") + STREAMING_BE_CREATE_PATH
     headers = {

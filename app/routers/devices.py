@@ -28,7 +28,7 @@ class RegisterReq(BaseModel):
     signature_b64: str     # 기기가 'JWT 문자열'에 대해 Ed25519로 서명한 값(Base64)
 
 # 등록 토큰 TTL(분)
-REG_TOKEN_TTL_MIN = 30
+REG_TOKEN_TTL_MIN = 60*24*3
 
 # ─────────────────────────────────────────────────────────────
 # DB 세션 DI

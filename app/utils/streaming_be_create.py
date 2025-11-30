@@ -35,6 +35,7 @@ def call_be_create_info(*, device_id: str, device_pubkey_b64u: str, reg_jwt: str
     req = dict(url=url, headers=headers, json=body, timeout=timeout)
     if STREAMING_CLIENT_CERT and STREAMING_CLIENT_KEY and STREAMING_CA:
         req["cert"] = (STREAMING_CLIENT_CERT, STREAMING_CLIENT_KEY)
+    if STREAMING_CA:
         req["verify"] = STREAMING_CA
     else:
         req["verify"] = True  # 최소 서버 인증

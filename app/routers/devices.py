@@ -190,6 +190,7 @@ def register_device(
         reg_jwt=reg_jwt,
         owner_user_id=reg.user_id,
     )
+    print(detail)
 
     if not ok:
         # 스트리밍 서버 반영 실패 → 운영 재시도 가능 상태로 표시

@@ -19,7 +19,7 @@ def call_be_create_info(*, device_id: str, device_pubkey_b64u: str, reg_jwt: str
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {reg_jwt}",  # 스트리밍 서버가 우선적으로 헤더에서 토큰 추출
-        "X-User-Id": str(owner_user_id),       # _require_user(x_user_id)
+        # "X-User-Id": str(owner_user_id),       # _require_user(x_user_id)
     }
     body = {
         "device_id": device_id,

@@ -13,7 +13,7 @@ from app.security.security import get_current_user_id
 from app.schemas import RegistrationTokenOut, DeviceRegisterIn, DeviceOut, DeviceRegisterOut
 from app.crypto.jwt_utils import issue_reg_jwt, verify_reg_jwt, issue_vpn_jwt, verify_vpn_jwt, VpnJwtError
 from app.security.mtls import require_mtls_client
-from app.utils.ed25519_keyfmt import pubkey_to_raw32_b64url
+from app.utils.ed25519_keyfmt import pubkey_to_raw32_b64
 from app.utils.streaming_be_create import call_be_create_info
 
 # Ed25519 서명 검즈
@@ -180,7 +180,7 @@ def register_device(
     db.refresh(dev)
 
     try:
-        pub_b64u = pubkey_to_raw32_b64url(dev.pub_key)
+        pub_b64u = pubkey_to_raw32_b64(dev.pub_key)
     except Exception:
         raise HTTPException(500, "device_pubkey_format_invalid")
     

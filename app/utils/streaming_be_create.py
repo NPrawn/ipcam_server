@@ -1,5 +1,8 @@
 # app/utils/streaming_be_create.py
 import os, time, requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 STREAMING_BASE = os.getenv("STREAMING_BASE", "https://cowboyhomecam.duckdns.org")
 STREAMING_BE_CREATE_PATH = "/api/vpn/tunnels/be_create_info"
